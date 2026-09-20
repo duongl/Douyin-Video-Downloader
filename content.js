@@ -102,7 +102,12 @@
       effective_type: "4g",
       round_trip_time: "0",
       count: "20",
-      publish_video_strategy_type: "2"
+      publish_video_strategy_type: "2",
+      from_user_page: "1",
+      locate_query: "false",
+      need_time_list: "1",
+      show_live_replay_strategy: "1",
+      time_list_query: "0"
     }
   };
 
@@ -216,21 +221,32 @@
     return match ? match[1] : "";
   }
 
+  function isDouyinModalOpen() {
+    return Boolean(
+      document.querySelector(
+        '[data-e2e="detail-video"], [data-e2e="modal-close-icon"], [data-e2e="video-detail"], [class*="detailContainer"], [class*="videoDetail"], div[class*="modal"] video, div[class*="detail"] video'
+      )
+    );
+  }
+
   function getActiveVideoInfo() {
     try {
       const url = new URL(window.location.href);
       const isTikTok = window.location.hostname.includes("tiktok.com");
 
-      // 1. Douyin query modal_id or vid (?modal_id=... or ?vid=...)
-      const modalId = url.searchParams.get("modal_id") || url.searchParams.get("vid");
-      if (modalId && /^\d+$/.test(modalId)) {
-        return { platform: "douyin", id: modalId, kind: "video" };
-      }
-
-      // 2. Douyin path /video/:id or /note/:id
+      // 1. Dedicated Douyin video or note page (/video/:id or /note/:id)
       const dyMatch = window.location.pathname.match(/\/(video|note)\/(\d+)/);
       if (dyMatch) {
         return { platform: "douyin", id: dyMatch[2], kind: dyMatch[1] === "note" ? "image" : "video" };
+      }
+
+      // 2. Douyin modal popup (?modal_id=...) - strictly verify that modal DOM is open!
+      // Never use 'vid', which is an old navigation tracking query parameter on /user/ pages.
+      const modalId = url.searchParams.get("modal_id");
+      if (modalId && /^\d+$/.test(modalId)) {
+        if (isDouyinModalOpen()) {
+          return { platform: "douyin", id: modalId, kind: "video" };
+        }
       }
 
       // 3. TikTok /@:user/video/:id or /photo/:id
@@ -248,12 +264,22 @@
   function createElement(tagName, options = {}) {
     const element = document.createElement(tagName);
     Object.entries(options).forEach(([key, value]) => {
-      if (key === "className") {
+      if (key === "className" || key === "class") {
         element.className = value;
-      } else if (key === "text") {
+      } else if (key === "text" || key === "textContent") {
         element.textContent = value;
-      } else if (key === "html") {
+      } else if (key === "html" || key === "innerHTML") {
         element.innerHTML = value;
+      } else if (key === "dataset" && typeof value === "object" && value !== null) {
+        Object.entries(value).forEach(([dk, dv]) => {
+          element.dataset[dk] = dv;
+        });
+      } else if (key === "style" && typeof value === "object" && value !== null) {
+        Object.assign(element.style, value);
+      } else if (key === "hidden") {
+        element.hidden = Boolean(value);
+      } else if (key === "disabled") {
+        element.disabled = Boolean(value);
       } else {
         element.setAttribute(key, value);
       }
@@ -1418,10 +1444,7 @@
         });
       }
 
-      this.repairTimer = window.setInterval(() => {
-        this.ensureTriggerButton();
-        this.ensureQuickBar();
-      }, CONFIG.BUTTON_RETRY_MS);
+      window.addEventListener("popstate", () => this.ensureQuickBarDebounced());
     }
 
     onDocumentClick(event) {
@@ -1430,6 +1453,7 @@
         const menu = quickBar.querySelector(".dyex-quick-menu");
         if (menu) menu.hidden = true;
       }
+      this.ensureQuickBarDebounced();
       const trigger = document.getElementById(CONFIG.TRIGGER_ID);
       if (trigger && trigger.contains(event.target)) return;
       if (this.ui.modal.contains(event.target)) return;
@@ -1439,6 +1463,7 @@
 
     onKeyDown(event) {
       if (event.key === "Escape") {
+        this.ensureQuickBarDebounced();
         if (this.ui.settingsDrawer.classList.contains("is-open")) {
           this.closeSettings();
           return;
@@ -1762,6 +1787,21 @@
       return container;
     }
 
+    createDouyinClient(secUserId = "", options = {}) {
+      return new DouyinApiClient(secUserId, {
+        referrer: window.location.href,
+        getCookiesFn: async () => {
+          try {
+            const res = await sendRuntimeMessage({ type: "GET_DOUYIN_SECURITY_PARAMS" });
+            return res?.cookies || {};
+          } catch (_) {
+            return {};
+          }
+        },
+        ...options
+      });
+    }
+
     showQuickToast(message, duration = 3000) {
       const quickBar = document.getElementById("dyex-quick-bar");
       const toast = createElement("div", {
@@ -1799,7 +1839,7 @@
           const client = new TikTokApiClient({ referrer: window.location.href });
           rawItem = await client.fetchDetail(videoInfo.id);
         } else {
-          const client = new DouyinApiClient("", { referrer: window.location.href });
+          const client = this.createDouyinClient();
           rawItem = await client.fetchDetail(videoInfo.id);
         }
 
@@ -1909,7 +1949,7 @@
           const client = new TikTokApiClient({ referrer: window.location.href });
           rawItem = await client.fetchDetail(videoInfo.id);
         } else {
-          const client = new DouyinApiClient("", { referrer: window.location.href });
+          const client = this.createDouyinClient();
           rawItem = await client.fetchDetail(videoInfo.id);
         }
 
@@ -2492,11 +2532,10 @@
       );
 
       try {
-        const apiClient = new DouyinApiClient(secUserId, {
+        const apiClient = this.createDouyinClient(secUserId, {
           signal: abortController.signal,
           apiBaseUrl: CONFIG.API_BASE_URL,
-          requestQuery: CONFIG.REQUEST_QUERY,
-          referrer: window.location.href
+          requestQuery: CONFIG.REQUEST_QUERY
         });
         const fetchedVideos = await this.fetchAllVideos(apiClient, requestId, secUserId, (partialVideos) => {
           if (!hadExistingData) {

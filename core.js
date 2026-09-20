@@ -227,6 +227,26 @@
     };
   }
 
+  function parseCookieJar(cookieString) {
+    const jar = {};
+    if (!cookieString || typeof cookieString !== "string") return jar;
+    cookieString.split(";").forEach((pair) => {
+      const idx = pair.indexOf("=");
+      if (idx > -1) {
+        const key = pair.slice(0, idx).trim();
+        const val = pair.slice(idx + 1).trim();
+        if (key) {
+          try {
+            jar[key] = decodeURIComponent(val);
+          } catch (_) {
+            jar[key] = val;
+          }
+        }
+      }
+    });
+    return jar;
+  }
+
   class DouyinApiClient {
     constructor(secUserId, options = {}) {
       this.secUserId = String(secUserId || "");
@@ -234,18 +254,51 @@
       this.apiBaseUrl = options.apiBaseUrl;
       this.requestQuery = options.requestQuery || {};
       this.referrer = options.referrer || "https://www.douyin.com/";
+      this.getCookiesFn = options.getCookiesFn || null;
     }
 
-    _signUrl(url) {
-      const signer = globalScope.DYEXABogus;
-      if (signer && typeof signer.signUrl === "function") {
+    async _getCookies() {
+      let jar = {};
+      if (typeof this.getCookiesFn === "function") {
         try {
-          return signer.signUrl(url.toString(), navigator.userAgent);
-        } catch (error) {
-          console.warn("Failed to generate a_bogus signature:", error);
+          const bgCookies = await this.getCookiesFn();
+          if (bgCookies && typeof bgCookies === "object") {
+            Object.assign(jar, bgCookies);
+          }
+        } catch (_) {}
+      }
+      if (typeof document !== "undefined" && document.cookie) {
+        const docJar = parseCookieJar(document.cookie);
+        jar = { ...docJar, ...jar };
+      }
+      return jar;
+    }
+
+    async _signUrlAndHeaders(url) {
+      const cookies = await this._getCookies();
+      const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+      const webSigner = globalScope.DYEXWebSign;
+      if (webSigner && typeof webSigner.signRequest === "function") {
+        try {
+          return webSigner.signRequest(url.toString(), cookies, ua);
+        } catch (err) {
+          console.warn("Failed to generate full web security signature:", err);
         }
       }
-      return url.toString();
+
+      const bogusSigner = globalScope.DYEXABogus;
+      if (bogusSigner && typeof bogusSigner.signUrl === "function") {
+        try {
+          return {
+            url: bogusSigner.signUrl(url.toString(), ua),
+            headers: {}
+          };
+        } catch (err) {
+          console.warn("Failed to generate a_bogus signature:", err);
+        }
+      }
+
+      return { url: url.toString(), headers: {} };
     }
 
     async fetchVideos(maxCursor = 0) {
@@ -253,15 +306,19 @@
       const query = { ...this.requestQuery, sec_user_id: this.secUserId, max_cursor: String(maxCursor) };
       Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, value));
 
-      const signedUrl = this._signUrl(url);
+      const { url: signedUrl, headers } = await this._signUrlAndHeaders(url);
 
       const response = await fetch(signedUrl, {
         method: "GET",
         credentials: "include",
         referrer: this.referrer,
         signal: this.signal,
-        headers: { Accept: "application/json, text/plain, */*" }
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          ...headers
+        }
       });
+
       if (!response.ok) {
         const status = Number(response.status);
         const code = [401, 403].includes(status)
@@ -274,12 +331,14 @@
           retryable: status === 429 || status >= 500
         });
       }
+
       let payload;
       try {
         payload = await response.json();
       } catch (error) {
         throw new CoreError(ERROR_CODES.DOUYIN_SCHEMA_INVALID, "Douyin returned malformed JSON.", { cause: error });
       }
+
       if (Number(payload?.status_code || 0) !== 0) {
         throw new CoreError(
           ERROR_CODES.DOUYIN_REQUEST_FAILED,
@@ -287,6 +346,7 @@
           { details: { statusCode: payload.status_code } }
         );
       }
+
       return payload;
     }
 
@@ -298,15 +358,19 @@
       delete query.count;
       Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, value));
 
-      const signedUrl = this._signUrl(url);
+      const { url: signedUrl, headers } = await this._signUrlAndHeaders(url);
 
       const response = await fetch(signedUrl, {
         method: "GET",
         credentials: "include",
         referrer: this.referrer,
         signal: this.signal,
-        headers: { Accept: "application/json, text/plain, */*" }
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          ...headers
+        }
       });
+
       if (!response.ok) {
         const status = Number(response.status);
         const code = [401, 403].includes(status)
@@ -319,12 +383,14 @@
           retryable: status === 429 || status >= 500
         });
       }
+
       let payload;
       try {
         payload = await response.json();
       } catch (error) {
         throw new CoreError(ERROR_CODES.DOUYIN_SCHEMA_INVALID, "Douyin returned malformed JSON.", { cause: error });
       }
+
       if (Number(payload?.status_code || 0) !== 0) {
         throw new CoreError(
           ERROR_CODES.DOUYIN_REQUEST_FAILED,
@@ -332,9 +398,11 @@
           { details: { statusCode: payload.status_code } }
         );
       }
+
       if (!payload.aweme_detail) {
         throw new CoreError(ERROR_CODES.DOUYIN_SCHEMA_INVALID, "Douyin returned empty video detail.");
       }
+
       return payload.aweme_detail;
     }
   }

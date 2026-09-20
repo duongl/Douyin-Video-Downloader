@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Douyin User Video Downloader",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Batch download Douyin and TikTok media with optional AI-translated filenames.",
   "permissions": [
     "downloads",
     "storage",
     "activeTab",
     "scripting",
-    "alarms"
+    "alarms",
+    "cookies"
   ],
   "host_permissions": [
     "https://www.douyin.com/*",

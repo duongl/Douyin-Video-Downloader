@@ -1,4 +1,4 @@
-importScripts("core.js", "background-core.js");
+importScripts("abogus.js", "core.js", "background-core.js");
 
 const Core = globalThis.DYEXCore;
 const BackgroundCore = globalThis.DYEXBackgroundCore;
@@ -976,11 +976,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "TRANSLATE_VIDEO_TITLES") {
-    enqueueTranslation(message.payload)
-      .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => sendResponse(createErrorResponse(error, Core.ERROR_CODES.AI_PROVIDER_UNAVAILABLE)));
-    return true;
+  if (message?.type === "GET_DOUYIN_SECURITY_PARAMS") {
+    if (chrome.cookies && chrome.cookies.getAll) {
+      chrome.cookies.getAll({ domain: "douyin.com" }, (cookies) => {
+        const error = chrome.runtime.lastError;
+        if (error || !cookies) {
+          sendResponse({ ok: false, cookies: {}, error: error?.message || "Failed to read cookies" });
+          return;
+        }
+        const jar = {};
+        for (const c of cookies) {
+          if (c && c.name && c.value) {
+            jar[c.name] = c.value;
+          }
+        }
+        sendResponse({ ok: true, cookies: jar });
+      });
+      return true;
+    }
+    sendResponse({ ok: false, cookies: {}, error: "chrome.cookies API unavailable" });
+    return false;
   }
 
   return false;
