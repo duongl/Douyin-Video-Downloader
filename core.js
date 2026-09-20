@@ -454,6 +454,208 @@
       }
       return item;
     }
+
+    _buildCommonParams() {
+      const randomDigits = Array.from({ length: 19 }, () => Math.floor(Math.random() * 10)).join("");
+      return {
+        aid: "1988",
+        app_name: "tiktok_web",
+        channel: "tiktok_web",
+        device_platform: "web_pc",
+        device_id: randomDigits,
+        os: "windows",
+        priority_region: "US",
+        region: "US",
+        language: "en",
+        browser_language: "en-US",
+        browser_platform: "Win32",
+        browser_name: "Mozilla",
+        browser_version: "5.0 (Windows)",
+        cookie_enabled: "true",
+        screen_width: "1920",
+        screen_height: "1080"
+      };
+    }
+
+    async fetchUserDetail(uniqueId) {
+      const url = new URL("https://www.tiktok.com/api/user/detail/");
+      const params = {
+        ...this._buildCommonParams(),
+        uniqueId: String(uniqueId).replace(/^@/, "")
+      };
+      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        credentials: "include",
+        referrer: this.referrer,
+        signal: this.signal,
+        headers: { Accept: "application/json, text/plain, */*" }
+      });
+      if (!response.ok) {
+        throw new CoreError(ERROR_CODES.DOUYIN_REQUEST_FAILED, `HTTP ${response.status} while fetching TikTok user detail.`);
+      }
+      const payload = await response.json();
+      return payload?.userInfo || null;
+    }
+
+    async fetchPostList({ secUid, cursor = 0, count = 35 }) {
+      const url = new URL("https://www.tiktok.com/api/post/item_list/");
+      const params = {
+        ...this._buildCommonParams(),
+        secUid: String(secUid),
+        count: String(count),
+        cursor: String(cursor)
+      };
+      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        credentials: "include",
+        referrer: this.referrer,
+        signal: this.signal,
+        headers: { Accept: "application/json, text/plain, */*" }
+      });
+      if (!response.ok) {
+        throw new CoreError(ERROR_CODES.DOUYIN_REQUEST_FAILED, `HTTP ${response.status} while fetching TikTok posts.`);
+      }
+      return await response.json();
+    }
+
+    extractSecUidFromPage() {
+      if (typeof document === "undefined") return "";
+      try {
+        const rehydration = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
+        if (rehydration && rehydration.textContent) {
+          const data = JSON.parse(rehydration.textContent);
+          const scope = data["__DEFAULT_SCOPE__"] || {};
+          const userDetail = scope["webapp.user-detail"];
+          if (userDetail?.userInfo?.user?.secUid) {
+            return userDetail.userInfo.user.secUid;
+          }
+        }
+      } catch (_) {}
+
+      try {
+        const sigi = document.getElementById("SIGI_STATE");
+        if (sigi && sigi.textContent) {
+          const data = JSON.parse(sigi.textContent);
+          const users = Object.values(data.UserModule?.users || {});
+          if (users[0]?.secUid) {
+            return users[0].secUid;
+          }
+        }
+      } catch (_) {}
+
+      return "";
+    }
+
+    extractInitialVideosFromPage() {
+      if (typeof document === "undefined") return [];
+      try {
+        const rehydration = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
+        if (rehydration && rehydration.textContent) {
+          const data = JSON.parse(rehydration.textContent);
+          const scope = data["__DEFAULT_SCOPE__"] || {};
+          const userDetail = scope["webapp.user-detail"];
+          const items = userDetail?.itemList;
+          if (Array.isArray(items) && items.length) {
+            return items.map((it) => extractVideoMetadata(it)).filter(Boolean);
+          }
+        }
+      } catch (_) {}
+
+      try {
+        const sigi = document.getElementById("SIGI_STATE");
+        if (sigi && sigi.textContent) {
+          const data = JSON.parse(sigi.textContent);
+          const items = Object.values(data.ItemModule || {});
+          if (items.length) {
+            return items.map((it) => extractVideoMetadata(it)).filter(Boolean);
+          }
+        }
+      } catch (_) {}
+
+      return [];
+    }
+
+    scanDomVideos() {
+      if (typeof document === "undefined") return [];
+      const cards = Array.from(
+        document.querySelectorAll(
+          '[data-e2e="user-post-item"], div[class*="DivItemContainer"], div[class*="DivItemWrapper"], div[class*="UserPostItem"]'
+        )
+      );
+
+      const videos = [];
+      const seen = new Set();
+
+      for (const card of cards) {
+        const link = card.querySelector('a[href*="/video/"], a[href*="/photo/"]') || (card.matches('a[href*="/video/"], a[href*="/photo/"]') ? card : null);
+        if (!link || !link.href) continue;
+
+        const match = link.href.match(/\/@([^/?#]+)\/(video|photo)\/(\d+)/);
+        if (!match) continue;
+
+        const id = match[3];
+        if (seen.has(id)) continue;
+        seen.add(id);
+
+        const isImage = match[2] === "photo";
+        const img = card.querySelector("img");
+        const coverUrl = img ? img.src : "";
+        const title = img?.alt || link.title || card.textContent?.trim()?.slice(0, 100) || `TikTok_${id}`;
+
+        videos.push({
+          id,
+          kind: isImage ? "image" : "video",
+          title,
+          caption: title,
+          desc: title,
+          createTime: "",
+          videoUrl: isImage ? "" : link.href,
+          audioUrl: "",
+          coverUrl,
+          dynamicCoverUrl: "",
+          author: match[1],
+          needsDetailResolve: true
+        });
+      }
+
+      return videos;
+    }
+  }
+
+  function normalizeTikTokPayload(payload, existingIds = new Set()) {
+    if (!payload || typeof payload !== "object") {
+      throw new CoreError(ERROR_CODES.DOUYIN_SCHEMA_INVALID, "TikTok returned an invalid response.");
+    }
+    const statusCode = Number(payload.statusCode ?? payload.status_code ?? 0);
+    if (statusCode !== 0) {
+      throw new CoreError(
+        ERROR_CODES.DOUYIN_REQUEST_FAILED,
+        `TikTok API returned status_code ${statusCode}.`,
+        { details: { statusCode } }
+      );
+    }
+    const rawItems = payload.itemList || payload.items || payload.aweme_list || [];
+    if (!Array.isArray(rawItems)) {
+      throw new CoreError(ERROR_CODES.DOUYIN_SCHEMA_INVALID, "TikTok changed the expected video-list format.");
+    }
+
+    const videos = [];
+    for (const item of rawItems) {
+      const video = extractVideoMetadata(item);
+      if (!video || existingIds.has(video.id)) continue;
+      existingIds.add(video.id);
+      videos.push(video);
+    }
+    const cursor = Number(payload.cursor || 0);
+    return {
+      videos,
+      hasMore: Boolean(payload.hasMore),
+      maxCursor: Number.isFinite(cursor) && cursor >= 0 ? cursor : 0
+    };
   }
 
   globalScope.DYEXCore = Object.freeze({
@@ -468,6 +670,7 @@
     migrateSettings,
     extractVideoMetadata,
     normalizeDouyinPayload,
+    normalizeTikTokPayload,
     DouyinApiClient,
     TikTokApiClient
   });

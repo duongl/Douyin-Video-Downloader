@@ -308,7 +308,9 @@ async function startQueueUnlocked(tabId, payload) {
   await sendQueueUpdate(tabId, nextQueue, "queued", {
     message: `Queue created with ${nextQueue.total} items.`,
   });
-  await startNextDownloadUnlocked(tabId);
+  void startNextDownloadUnlocked(tabId).catch((err) => {
+    reportBackgroundError("startNextDownloadUnlocked", err);
+  });
 }
 
 function startQueue(tabId, payload) {
@@ -996,6 +998,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     sendResponse({ ok: false, cookies: {}, error: "chrome.cookies API unavailable" });
     return false;
+  }
+
+  if (message?.type === "TRANSLATE_VIDEO_TITLES") {
+    enqueueTranslation(message.payload)
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse(createErrorResponse(error, Core.ERROR_CODES.AI_PROVIDER_UNAVAILABLE)));
+    return true;
   }
 
   return false;

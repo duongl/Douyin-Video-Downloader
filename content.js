@@ -216,9 +216,25 @@
     throw lastError;
   }
 
+  function getProfileInfoFromUrl() {
+    const isTikTok = window.location.hostname.includes("tiktok.com");
+    if (isTikTok) {
+      const match = window.location.pathname.match(/^\/@([^/?#]+)\/?$/);
+      if (match) {
+        return { platform: "tiktok", id: match[1], username: match[1], secUserId: match[1] };
+      }
+    } else {
+      const match = window.location.pathname.match(/\/user\/([^/?#]+)/);
+      if (match) {
+        return { platform: "douyin", id: match[1], secUserId: match[1] };
+      }
+    }
+    return null;
+  }
+
   function getSecUserIdFromUrl() {
-    const match = window.location.pathname.match(/\/user\/([^/?#]+)/);
-    return match ? match[1] : "";
+    const info = getProfileInfoFromUrl();
+    return info ? info.secUserId : "";
   }
 
   function isDouyinModalOpen() {
@@ -229,11 +245,76 @@
     );
   }
 
+  function isTikTokModalOpen() {
+    return Boolean(
+      document.querySelector(
+        '[data-e2e="modal-close-icon"], [data-e2e="browse-close"], button[aria-label="Close"], div[class*="ButtonClose"], [data-e2e="browse-video"], div[class*="DivBrowserModeContainer"]'
+      )
+    );
+  }
+
   function getActiveVideoInfo() {
     try {
       const url = new URL(window.location.href);
       const isTikTok = window.location.hostname.includes("tiktok.com");
 
+      if (isTikTok) {
+        // 1. Dedicated TikTok video or photo page (/video/:id or /photo/:id)
+        const ttMatch = window.location.pathname.match(/\/@([^/?#]+)\/(video|photo)\/(\d+)/);
+        if (ttMatch) {
+          return { platform: "tiktok", id: ttMatch[3], kind: ttMatch[2] === "photo" ? "image" : "video", author: ttMatch[1] };
+        }
+
+        // 2. TikTok modal popup (when clicking a video card) - look for open modal container or copy link input
+        if (isTikTokModalOpen()) {
+          const copyInputs = Array.from(document.querySelectorAll('input[value*="/video/"], input[value*="/photo/"]'));
+          for (const input of copyInputs) {
+            const m = (input.value || "").match(/\/@([^/?#]+)\/(video|photo)\/(\d+)/);
+            if (m) {
+              return { platform: "tiktok", id: m[3], kind: m[2] === "photo" ? "image" : "video", author: m[1] };
+            }
+          }
+
+          const modalContainer = document.querySelector(
+            '[data-e2e="browse-video"], div[class*="DivBrowserModeContainer"], div[class*="DivVideoWrapper"], [data-e2e="modal-close-icon"]'
+          )?.closest('div[class*="Container"], div[role="dialog"], body') || document;
+
+          const modalLinks = Array.from(modalContainer.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]'));
+          for (const link of modalLinks) {
+            const m = (link.href || "").match(/\/@([^/?#]+)\/(video|photo)\/(\d+)/);
+            if (m) {
+              return { platform: "tiktok", id: m[3], kind: m[2] === "photo" ? "image" : "video", author: m[1] };
+            }
+          }
+        }
+
+        // 3. From Currently Playing / Focused Video on TikTok (Feed, Explore, or User page)
+        // User does NOT need to click comments - as soon as video plays, it is detected!
+        const videoElements = Array.from(document.querySelectorAll("video"));
+        const playingVideo = videoElements.find((v) => !v.paused && v.readyState >= 2) ||
+          videoElements.find((v) => {
+            const rect = v.getBoundingClientRect();
+            return rect.width > 120 && rect.height > 120 && rect.top < window.innerHeight * 0.75 && rect.bottom > window.innerHeight * 0.25;
+          });
+
+        if (playingVideo) {
+          let curr = playingVideo.parentElement;
+          for (let i = 0; i < 12 && curr; i++) {
+            const link = curr.querySelector('a[href*="/video/"], a[href*="/photo/"]');
+            if (link && link.href) {
+              const m = link.href.match(/\/@([^/?#]+)\/(video|photo)\/(\d+)/);
+              if (m) {
+                return { platform: "tiktok", id: m[3], kind: m[2] === "photo" ? "image" : "video", author: m[1] };
+              }
+            }
+            curr = curr.parentElement;
+          }
+        }
+
+        return null;
+      }
+
+      // Douyin:
       // 1. Dedicated Douyin video or note page (/video/:id or /note/:id)
       const dyMatch = window.location.pathname.match(/\/(video|note)\/(\d+)/);
       if (dyMatch) {
@@ -241,19 +322,10 @@
       }
 
       // 2. Douyin modal popup (?modal_id=...) - strictly verify that modal DOM is open!
-      // Never use 'vid', which is an old navigation tracking query parameter on /user/ pages.
       const modalId = url.searchParams.get("modal_id");
       if (modalId && /^\d+$/.test(modalId)) {
         if (isDouyinModalOpen()) {
           return { platform: "douyin", id: modalId, kind: "video" };
-        }
-      }
-
-      // 3. TikTok /@:user/video/:id or /photo/:id
-      if (isTikTok) {
-        const ttMatch = window.location.pathname.match(/\/@([^/?#]+)\/(video|photo)\/(\d+)/);
-        if (ttMatch) {
-          return { platform: "tiktok", id: ttMatch[3], kind: ttMatch[2] === "photo" ? "image" : "video", author: ttMatch[1] };
         }
       }
     } catch (_e) {}
@@ -288,6 +360,26 @@
   }
 
   function findProfileTabAnchor() {
+    const isTikTok = window.location.hostname.includes("tiktok.com");
+    if (isTikTok) {
+      const ttTabSelectors = [
+        '[data-e2e="user-post-item-list"]',
+        'div[role="tablist"]',
+        'p[role="tab"]',
+        'div[role="tab"]',
+        '[data-e2e*="tab"]',
+        'div[class*="DivTabContainer"]'
+      ];
+      for (const sel of ttTabSelectors) {
+        const found = document.querySelector(sel);
+        if (found) return found;
+      }
+      const headerFallback = document.querySelector(
+        '[data-e2e="user-subtitle"], [data-e2e="user-title"], h2[data-e2e="user-subtitle"], h1[data-e2e="user-title"]'
+      );
+      if (headerFallback) return headerFallback;
+    }
+
     for (const selector of CONFIG.ANCHOR_SELECTORS) {
       const candidates = Array.from(document.querySelectorAll(selector));
       const matched = candidates.find((element) => {
@@ -306,14 +398,22 @@
 
   function sendRuntimeMessage(message) {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(message, (response) => {
-        const error = chrome.runtime.lastError;
-        if (error) {
-          reject(new Core.CoreError(Core.ERROR_CODES.UNKNOWN, error.message, { retryable: true }));
-          return;
-        }
-        resolve(response);
-      });
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          const error = chrome.runtime.lastError;
+          if (error) {
+            let msg = error.message;
+            if (msg && (msg.includes("message port closed") || msg.includes("context invalidated") || msg.includes("Receiving end does not exist"))) {
+              msg = "Extension was updated or service worker reloaded. Please refresh the page (F5).";
+            }
+            reject(new Core.CoreError(Core.ERROR_CODES.UNKNOWN, msg, { retryable: true }));
+            return;
+          }
+          resolve(response);
+        });
+      } catch (err) {
+        reject(new Core.CoreError(Core.ERROR_CODES.UNKNOWN, err?.message || "Runtime message failed", { retryable: true }));
+      }
     });
   }
 
@@ -1445,6 +1545,8 @@
       }
 
       window.addEventListener("popstate", () => this.ensureQuickBarDebounced());
+      document.addEventListener("play", () => this.ensureQuickBarDebounced(), true);
+      document.addEventListener("playing", () => this.ensureQuickBarDebounced(), true);
     }
 
     onDocumentClick(event) {
@@ -1588,11 +1690,15 @@
     }
 
     createTriggerButton() {
+      const profile = getProfileInfoFromUrl();
+      const isTikTok = profile?.platform === "tiktok" || window.location.hostname.includes("tiktok.com");
+      const title = this.t(isTikTok ? "Open TikTok Downloader" : "Open Douyin Downloader");
       const button = createElement("button", {
         id: CONFIG.TRIGGER_ID,
         type: "button",
-        title: this.t("Open Douyin Downloader"),
-        "aria-label": this.t("Open Douyin Downloader"),
+        title,
+        "aria-label": title,
+        dataset: { platform: isTikTok ? "tiktok" : "douyin" },
         html: `
           <svg class="dyex-trigger-download-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M12 4v11" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
@@ -1619,7 +1725,8 @@
 
     ensureTriggerButton() {
       const existing = document.getElementById(CONFIG.TRIGGER_ID);
-      if (!/\/user\/[^/?#]+/.test(window.location.pathname)) {
+      const profile = getProfileInfoFromUrl();
+      if (!profile) {
         if (existing) existing.remove();
         return;
       }
@@ -1639,9 +1746,14 @@
     syncTriggerState(trigger = document.getElementById(CONFIG.TRIGGER_ID)) {
       if (!trigger) return;
       const isBusy = Boolean(this.isFetching);
+      const isTikTok = window.location.hostname.includes("tiktok.com");
       trigger.dataset.busy = String(isBusy);
       trigger.setAttribute("aria-busy", String(isBusy));
-      trigger.title = this.t(isBusy ? "Loading Douyin videos..." : "Open Douyin Downloader");
+      trigger.title = this.t(
+        isBusy
+          ? isTikTok ? "Scanning TikTok videos..." : "Loading Douyin videos..."
+          : isTikTok ? "Open TikTok Downloader" : "Open Douyin Downloader"
+      );
       trigger.setAttribute("aria-label", trigger.title);
     }
 
@@ -1653,8 +1765,12 @@
         return;
       }
 
+      const isTikTok = videoInfo.platform === "tiktok";
+      const isModal = isTikTok ? isTikTokModalOpen() : isDouyinModalOpen();
+      const mode = isModal ? "modal" : "page";
+
       if (existing) {
-        if (existing.dataset.videoId === videoInfo.id && existing.dataset.platform === videoInfo.platform) {
+        if (existing.dataset.videoId === videoInfo.id && existing.dataset.platform === videoInfo.platform && existing.dataset.mode === mode) {
           if (!existing.isConnected && document.body) {
             document.body.appendChild(existing);
           }
@@ -1663,19 +1779,20 @@
         existing.remove();
       }
 
-      const bar = this.createQuickBar(videoInfo);
+      const bar = this.createQuickBar(videoInfo, mode);
       if (document.body) {
         document.body.appendChild(bar);
       }
     }
 
-    createQuickBar(videoInfo) {
+    createQuickBar(videoInfo, mode = "page") {
       const container = createElement("div", {
         id: "dyex-quick-bar",
         dataset: {
           videoId: videoInfo.id,
           platform: videoInfo.platform,
-          kind: videoInfo.kind || "video"
+          kind: videoInfo.kind || "video",
+          mode
         }
       });
 
@@ -2532,25 +2649,45 @@
       );
 
       try {
-        const apiClient = this.createDouyinClient(secUserId, {
-          signal: abortController.signal,
-          apiBaseUrl: CONFIG.API_BASE_URL,
-          requestQuery: CONFIG.REQUEST_QUERY
-        });
-        const fetchedVideos = await this.fetchAllVideos(apiClient, requestId, secUserId, (partialVideos) => {
-          if (!hadExistingData) {
-            this.videos = [...partialVideos];
-            this.videoMap = new Map(this.videos.map((video) => [video.id, video]));
-            this.renderVideos();
-            this.updateSelectionUi();
-          }
-          this.setStatusKey(
-            hadExistingData ? "Refreshing... {count} videos found" : "Loading... {count} videos found",
-            { count: partialVideos.length },
-            "info",
-            true
-          );
-        });
+        const isTikTok = window.location.hostname.includes("tiktok.com");
+        let fetchedVideos;
+
+        if (isTikTok) {
+          fetchedVideos = await this.fetchAllTikTokVideos(requestId, secUserId, (partialVideos) => {
+            if (!hadExistingData) {
+              this.videos = [...partialVideos];
+              this.videoMap = new Map(this.videos.map((video) => [video.id, video]));
+              this.renderVideos();
+              this.updateSelectionUi();
+            }
+            this.setStatusKey(
+              hadExistingData ? "Refreshing... {count} videos found" : "Loading... {count} videos found",
+              { count: partialVideos.length },
+              "info",
+              true
+            );
+          });
+        } else {
+          const apiClient = this.createDouyinClient(secUserId, {
+            signal: abortController.signal,
+            apiBaseUrl: CONFIG.API_BASE_URL,
+            requestQuery: CONFIG.REQUEST_QUERY
+          });
+          fetchedVideos = await this.fetchAllVideos(apiClient, requestId, secUserId, (partialVideos) => {
+            if (!hadExistingData) {
+              this.videos = [...partialVideos];
+              this.videoMap = new Map(this.videos.map((video) => [video.id, video]));
+              this.renderVideos();
+              this.updateSelectionUi();
+            }
+            this.setStatusKey(
+              hadExistingData ? "Refreshing... {count} videos found" : "Loading... {count} videos found",
+              { count: partialVideos.length },
+              "info",
+              true
+            );
+          });
+        }
         if (!this.isCurrentFetch(requestId, secUserId)) return;
         this.videos = fetchedVideos;
         this.videoMap = new Map(fetchedVideos.map((video) => [video.id, video]));
@@ -2595,6 +2732,83 @@
 
     isCurrentFetch(requestId, secUserId) {
       return requestId === this.fetchRequestId && secUserId === this.currentSecUserId;
+    }
+
+    async fetchAllTikTokVideos(requestId, username, onProgress) {
+      const client = new TikTokApiClient({ referrer: window.location.href });
+      const seenIds = new Set();
+      const fetchedVideos = [];
+
+      // 1. Initial videos from page SSR state (instant)
+      try {
+        const initial = client.extractInitialVideosFromPage();
+        for (const v of initial) {
+          if (!seenIds.has(v.id)) {
+            seenIds.add(v.id);
+            fetchedVideos.push(v);
+          }
+        }
+        if (fetchedVideos.length) {
+          onProgress(fetchedVideos);
+        }
+      } catch (err) {
+        console.warn("Could not extract SSR videos:", err);
+      }
+
+      // 2. Fetch via post_item_list API
+      let secUid = client.extractSecUidFromPage();
+      if (!secUid) {
+        try {
+          const userDetail = await client.fetchUserDetail(username);
+          secUid = userDetail?.user?.secUid || "";
+        } catch (_) {}
+      }
+
+      if (secUid) {
+        let cursor = 0;
+        let hasMore = true;
+        let pageCount = 0;
+        while (hasMore && pageCount < 30) {
+          pageCount++;
+          try {
+            const payload = await retryWithDelay(() => client.fetchPostList({ secUid, cursor, count: 35 }), 2, 1000);
+            if (!this.isCurrentFetch(requestId, username)) return fetchedVideos;
+            const { videos, hasMore: nextHasMore, maxCursor: nextCursor } = Core.normalizeTikTokPayload(payload, seenIds);
+            for (const v of videos) {
+              fetchedVideos.push(v);
+            }
+            if (videos.length) {
+              onProgress(fetchedVideos);
+            }
+            hasMore = nextHasMore && nextCursor > cursor;
+            cursor = nextCursor;
+            if (hasMore) await sleep(CONFIG.REQUEST_DELAY_MS);
+          } catch (err) {
+            console.warn("TikTok post_item_list API finished or restricted:", err);
+            break;
+          }
+        }
+      }
+
+      // 3. Scan DOM videos as fallback / complement
+      try {
+        const domVideos = client.scanDomVideos();
+        let addedFromDom = false;
+        for (const v of domVideos) {
+          if (!seenIds.has(v.id)) {
+            seenIds.add(v.id);
+            fetchedVideos.push(v);
+            addedFromDom = true;
+          }
+        }
+        if (addedFromDom) {
+          onProgress(fetchedVideos);
+        }
+      } catch (err) {
+        console.warn("DOM scanning error:", err);
+      }
+
+      return fetchedVideos;
     }
 
     async fetchAllVideos(apiClient, requestId, secUserId, onProgress) {
@@ -2762,6 +2976,26 @@
             "success",
             true
           );
+        }
+
+        const isTikTok = window.location.hostname.includes("tiktok.com");
+        if (isTikTok) {
+          const client = new TikTokApiClient({ referrer: window.location.href });
+          for (const video of selectedVideos) {
+            if (video.needsDetailResolve || (kind === "video" && !video.videoUrl) || (kind === "audio" && !video.audioUrl)) {
+              try {
+                this.setStatusKey("Resolving media info for {id}...", { id: video.id }, "info", true);
+                const rawItem = await client.fetchDetail(video.id);
+                const meta = extractVideoMetadata(rawItem);
+                if (meta) {
+                  Object.assign(video, meta, { needsDetailResolve: false });
+                  this.videoMap.set(video.id, video);
+                }
+              } catch (err) {
+                console.warn(`Failed to resolve detail for video ${video.id}:`, err);
+              }
+            }
+          }
         }
 
         const items = selectedVideos

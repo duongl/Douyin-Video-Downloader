@@ -737,25 +737,37 @@
     "Version": "Phiên bản",
     "Close settings": "Đóng cài đặt",
     "Select video {index}": "Chọn video {index}",
-    "Cache": "Bộ nhớ đệm"
+    "Cache": "Bộ nhớ đệm",
+    "Open TikTok Downloader": "Mở trình tải TikTok",
+    "Scan page videos": "Quét video trên trang",
+    "Scanning TikTok videos...": "Đang quét video TikTok..."
   });
   Object.assign(UI_TRANSLATIONS.JP, {
     "Version": "バージョン",
     "Close settings": "設定を閉じる",
     "Select video {index}": "動画 {index} を選択",
-    "Cache": "キャッシュ"
+    "Cache": "キャッシュ",
+    "Open TikTok Downloader": "TikTokダウンローダーを開く",
+    "Scan page videos": "ページの動画をスキャン",
+    "Scanning TikTok videos...": "TikTok動画をスキャン中..."
   });
   Object.assign(UI_TRANSLATIONS.KR, {
     "Version": "버전",
     "Close settings": "설정 닫기",
     "Select video {index}": "동영상 {index} 선택",
-    "Cache": "캐시"
+    "Cache": "캐시",
+    "Open TikTok Downloader": "TikTok 다운로더 열기",
+    "Scan page videos": "페이지 동영상 스캔",
+    "Scanning TikTok videos...": "TikTok 동영상 스캔 중..."
   });
   Object.assign(UI_TRANSLATIONS.CN, {
     "Version": "版本",
     "Close settings": "关闭设置",
     "Select video {index}": "选择视频 {index}",
-    "Cache": "缓存"
+    "Cache": "缓存",
+    "Open TikTok Downloader": "打开TikTok下载器",
+    "Scan page videos": "扫描页面视频",
+    "Scanning TikTok videos...": "正在扫描TikTok视频..."
   });
 
   const UI_TRANSLATION_KEYS = new Set(
