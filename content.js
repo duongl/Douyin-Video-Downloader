@@ -219,8 +219,11 @@
   function getProfileInfoFromUrl() {
     const isTikTok = window.location.hostname.includes("tiktok.com");
     if (isTikTok) {
-      const match = window.location.pathname.match(/^\/@([^/?#]+)\/?$/);
+      const match = window.location.pathname.match(/^\/@([^/?#]+)/);
       if (match) {
+        if ((window.location.pathname.includes("/video/") || window.location.pathname.includes("/photo/")) && !isTikTokModalOpen()) {
+          return null;
+        }
         return { platform: "tiktok", id: match[1], username: match[1], secUserId: match[1] };
       }
     } else {
@@ -260,64 +263,8 @@
       const profile = getProfileInfoFromUrl();
 
       if (isTikTok) {
-        // IMPORTANT: If user is on a profile page and no modal popup is currently open,
-        // do NOT show the single-video quick bar. The profile trigger button (#dyex-trigger)
-        // beside the channel's Video tab handles profile downloads.
-        if (profile && !isTikTokModalOpen()) {
-          return null;
-        }
-
-        // 1. Dedicated TikTok video or photo page (/video/:id or /photo/:id)
-        const ttMatch = window.location.pathname.match(/\/@([^/?#]+)\/(video|photo)\/(\d+)/);
-        if (ttMatch) {
-          return { platform: "tiktok", id: ttMatch[3], kind: ttMatch[2] === "photo" ? "image" : "video", author: ttMatch[1] };
-        }
-
-        // 2. TikTok modal popup (when clicking a video card) - look for open modal container or copy link input
-        if (isTikTokModalOpen()) {
-          const copyInputs = Array.from(document.querySelectorAll('input[value*="/video/"], input[value*="/photo/"]'));
-          for (const input of copyInputs) {
-            const m = (input.value || "").match(/\/@([^/?#]+)\/(video|photo)\/(\d+)/);
-            if (m) {
-              return { platform: "tiktok", id: m[3], kind: m[2] === "photo" ? "image" : "video", author: m[1] };
-            }
-          }
-
-          const modalContainer = document.querySelector(
-            '[data-e2e="browse-video"], div[class*="DivBrowserModeContainer"], div[class*="DivVideoWrapper"], [data-e2e="modal-close-icon"]'
-          )?.closest('div[class*="Container"], div[role="dialog"], body') || document;
-
-          const modalLinks = Array.from(modalContainer.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]'));
-          for (const link of modalLinks) {
-            const m = (link.href || "").match(/\/@([^/?#]+)\/(video|photo)\/(\d+)/);
-            if (m) {
-              return { platform: "tiktok", id: m[3], kind: m[2] === "photo" ? "image" : "video", author: m[1] };
-            }
-          }
-        }
-
-        // 3. From Currently Playing Video on TikTok Feed (For You, Following, Explore)
-        // ONLY detect if actively playing with playback progress.
-        // NEVER detect paused videos or thumbnails by bounding box, and NEVER on profile pages.
-        const videoElements = Array.from(document.querySelectorAll("video"));
-        const playingVideo = videoElements.find(
-          (v) => !v.paused && v.readyState >= 2 && !v.ended && v.currentTime > 0
-        );
-
-        if (playingVideo) {
-          let curr = playingVideo.parentElement;
-          for (let i = 0; i < 12 && curr; i++) {
-            const link = curr.querySelector('a[href*="/video/"], a[href*="/photo/"]');
-            if (link && link.href) {
-              const m = link.href.match(/\/@([^/?#]+)\/(video|photo)\/(\d+)/);
-              if (m) {
-                return { platform: "tiktok", id: m[3], kind: m[2] === "photo" ? "image" : "video", author: m[1] };
-              }
-            }
-            curr = curr.parentElement;
-          }
-        }
-
+        // TikTok: Single video quick download button is disabled per user preference.
+        // Channel scanning and batch downloading is supported via #dyex-trigger on profile pages.
         return null;
       }
 
@@ -412,6 +359,13 @@
       });
       if (matched) return matched;
     }
+
+    const dyWorksTab = Array.from(document.querySelectorAll('[role="tab"], div, span, p')).find((element) => {
+      const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text || text.length > 24) return false;
+      return /\u4f5c\u54c1/.test(text);
+    });
+    if (dyWorksTab) return dyWorksTab;
 
     return Array.from(document.querySelectorAll("div, span, button, a")).find((element) => {
       const text = (element.textContent || "").replace(/\s+/g, " ").trim();
@@ -1544,6 +1498,7 @@
     startObservers() {
       this.routeTimer = window.setInterval(() => {
         this.ensureQuickBar();
+        this.ensureTriggerButton();
         const nextSecUserId = getSecUserIdFromUrl();
         if (nextSecUserId === this.currentSecUserId) return;
         this.currentSecUserId = nextSecUserId;
@@ -1567,6 +1522,10 @@
           subtree: true
         });
       }
+
+      this.repairTimer = window.setInterval(() => {
+        this.ensureTriggerButton();
+      }, CONFIG.BUTTON_RETRY_MS);
 
       window.addEventListener("popstate", () => this.ensureQuickBarDebounced());
       document.addEventListener("play", () => this.ensureQuickBarDebounced(), true);
@@ -1755,8 +1714,11 @@
 
     ensureTriggerButton() {
       const existing = document.getElementById(CONFIG.TRIGGER_ID);
-      const profile = getProfileInfoFromUrl();
-      if (!profile) {
+      const isTikTok = window.location.hostname.includes("tiktok.com");
+      const isDouyinProfile = /\/user\/[^/?#]+/.test(window.location.pathname);
+      const isTikTokProfile = isTikTok && /^\/@[^/?#]+/.test(window.location.pathname);
+
+      if (!isDouyinProfile && !isTikTokProfile) {
         if (existing) existing.remove();
         return;
       }
@@ -1764,7 +1726,7 @@
       const anchor = findProfileTabAnchor();
       if (!anchor || !anchor.parentElement || !anchor.isConnected) return;
 
-      if (existing && existing.parentElement === anchor.parentElement && existing.previousElementSibling === anchor) {
+      if (existing && existing.isConnected && existing.parentElement === anchor.parentElement) {
         this.syncTriggerState(existing);
         return;
       }
@@ -1788,8 +1750,14 @@
     }
 
     ensureQuickBar() {
-      const videoInfo = getActiveVideoInfo();
+      const isTikTok = window.location.hostname.includes("tiktok.com");
       const existing = document.getElementById("dyex-quick-bar");
+      if (isTikTok) {
+        if (existing) existing.remove();
+        return;
+      }
+
+      const videoInfo = getActiveVideoInfo();
       if (!videoInfo) {
         if (existing) existing.remove();
         return;

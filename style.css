@@ -1705,13 +1705,23 @@
   background: rgba(254, 44, 85, 0.1);
 }
 
+#dyex-trigger:active {
+  transform: translateY(0);
+}
+
 #dyex-trigger svg {
   width: 18px;
   height: 18px;
+  display: block;
+}
+
+#dyex-trigger .dyex-trigger-download-icon {
+  display: block;
 }
 
 #dyex-trigger .dyex-trigger-loading-icon {
   display: none;
+  animation: dyex-spin 0.8s linear infinite;
 }
 
 #dyex-trigger[data-busy="true"] {
@@ -1725,7 +1735,6 @@
 
 #dyex-trigger[data-busy="true"] .dyex-trigger-loading-icon {
   display: block;
-  animation: dyex-spin 0.8s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1733,6 +1742,7 @@
     animation-duration: 1.6s;
   }
 }
+
 
 @keyframes dyex-fade-in {
   from { opacity: 0; }
@@ -2305,70 +2315,9 @@
   }
 }
 
-/* TikTok-specific positioning: place at bottom-left in modal/video view so it never covers comments */
+/* TikTok: Single video quick download bar is disabled completely per user preference */
 #dyex-quick-bar[data-platform="tiktok"] {
-  right: auto !important;
-  left: 32px !important;
-  bottom: 36px !important;
-  align-items: flex-start !important;
-}
-
-#dyex-quick-bar[data-platform="tiktok"] .dyex-quick-menu {
-  align-items: flex-start !important;
-}
-
-/* Channel Profile Trigger Button (Douyin & TikTok) */
-#dyex-trigger {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 36px !important;
-  height: 36px !important;
-  margin: 0 8px !important;
-  padding: 0 !important;
-  border-radius: 50% !important;
-  border: none !important;
-  outline: none !important;
-  background: linear-gradient(135deg, #fe2c55 0%, #ff004f 100%) !important;
-  color: #ffffff !important;
-  cursor: pointer !important;
-  box-shadow: 0 3px 12px rgba(254, 44, 85, 0.42) !important;
-  transition: transform 0.18s ease, box-shadow 0.18s ease !important;
-  vertical-align: middle !important;
-  z-index: 99 !important;
-  flex-shrink: 0 !important;
-}
-
-#dyex-trigger:hover {
-  transform: scale(1.08) !important;
-  box-shadow: 0 5px 18px rgba(254, 44, 85, 0.6) !important;
-}
-
-#dyex-trigger:active {
-  transform: scale(0.96) !important;
-}
-
-#dyex-trigger svg {
-  width: 18px !important;
-  height: 18px !important;
-  display: block !important;
-  color: #ffffff !important;
-}
-
-#dyex-trigger .dyex-trigger-download-icon {
-  display: block !important;
-}
-
-#dyex-trigger .dyex-trigger-loading-icon {
-  display: none !important;
-  animation: dyex-spin 0.8s linear infinite !important;
-}
-
-#dyex-trigger[data-busy="true"] .dyex-trigger-download-icon {
   display: none !important;
 }
 
-#dyex-trigger[data-busy="true"] .dyex-trigger-loading-icon {
-  display: block !important;
-}
 
