@@ -12,9 +12,9 @@
     "cookies"
   ],
   "host_permissions": [
-    "https://www.douyin.com/*",
+    "https://douyin.com/*",
     "https://*.douyin.com/*",
-    "https://www.tiktok.com/*",
+    "https://tiktok.com/*",
     "https://*.tiktok.com/*",
     "https://generativelanguage.googleapis.com/*",
     "https://api.groq.com/*"
@@ -31,9 +31,9 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.douyin.com/*",
+        "https://douyin.com/*",
         "https://*.douyin.com/*",
-        "https://www.tiktok.com/*",
+        "https://tiktok.com/*",
         "https://*.tiktok.com/*"
       ],
       "js": [
@@ -54,9 +54,9 @@
         "QR.png"
       ],
       "matches": [
-        "https://www.douyin.com/*",
+        "https://douyin.com/*",
         "https://*.douyin.com/*",
-        "https://www.tiktok.com/*",
+        "https://tiktok.com/*",
         "https://*.tiktok.com/*"
       ]
     }

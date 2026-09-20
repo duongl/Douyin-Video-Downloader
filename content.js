@@ -325,26 +325,54 @@
   function findProfileTabAnchor() {
     const isTikTok = window.location.hostname.includes("tiktok.com");
     if (isTikTok) {
-      // 1. Look for specific Video tab
-      const tabElements = Array.from(
-        document.querySelectorAll('[role="tab"], [data-e2e*="tab"], p[class*="Tab"], div[class*="Tab"]')
+      // 1. Look for tab elements by role, data-e2e, or class
+      const explicitTabs = Array.from(
+        document.querySelectorAll('[role="tab"], [data-e2e*="tab"], [data-e2e*="Tab"], p[class*="Tab"], div[class*="Tab"]')
       );
-      const videoTab = tabElements.find((el) => {
-        const text = (el.textContent || "").trim();
-        return /^(video|videos|video\s*\d+|bài đăng)$/i.test(text);
+      const explicitVideoTab = explicitTabs.find((el) => {
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+        return /^(video|videos|video\s*\d+|bài đăng|posts?)$/i.test(text);
       });
-      if (videoTab) return videoTab;
+      if (explicitVideoTab) return explicitVideoTab;
 
-      // 2. Look for tablist container or its first tab
-      const tablist = document.querySelector('div[role="tablist"], [role="tablist"]');
+      // 2. Scan all short text elements (p, span, div, a, button) with exact "Video" / "Videos" / "Bài đăng"
+      // and verify it is a tab by checking if its parent or siblings contain other tab names
+      const textCandidates = Array.from(document.querySelectorAll("p, span, div, a, button")).filter((el) => {
+        if (el.children.length > 2) return false;
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+        return /^(video|videos|bài đăng)$/i.test(text);
+      });
+
+      const tabCandidate = textCandidates.find((el) => {
+        const container = el.closest('div[role="tablist"], nav, div[class*="container"], div');
+        if (!container) return false;
+        const containerText = (container.textContent || "").toLowerCase();
+        return (
+          containerText.includes("bài đăng lại") ||
+          containerText.includes("đã thích") ||
+          containerText.includes("repost") ||
+          containerText.includes("liked") ||
+          containerText.includes("favorites") ||
+          containerText.includes("mới nhất") ||
+          containerText.includes("latest")
+        );
+      });
+      if (tabCandidate) return tabCandidate;
+
+      if (textCandidates.length > 0 && textCandidates[0].parentElement) {
+        return textCandidates[0];
+      }
+
+      // 3. Look for tablist container or its first tab
+      const tablist = document.querySelector('div[role="tablist"], [role="tablist"], nav');
       if (tablist) {
         if (tablist.firstElementChild) return tablist.firstElementChild;
         return tablist;
       }
 
-      // 3. Look for user header elements
+      // 4. Header action / follow buttons area fallback
       const headerFallback = document.querySelector(
-        '[data-e2e="user-info-wrapper"], [data-e2e="user-stats"], [data-e2e="user-subtitle"], [data-e2e="user-title"], h2[data-e2e="user-subtitle"], h1[data-e2e="user-title"]'
+        '[data-e2e="user-info-wrapper"], [data-e2e="user-stats"], [data-e2e="user-subtitle"], [data-e2e="user-title"], h2[data-e2e="user-subtitle"], h1[data-e2e="user-title"], button[data-e2e="follow-button"]'
       );
       if (headerFallback) return headerFallback;
 
@@ -1246,6 +1274,7 @@
     }
 
     syncSettingsInputs() {
+      if (!this.ui?.uiLanguageSelect) return;
       this.ui.uiLanguageSelect.value = this.settings.uiLanguage;
       this.applyUiLanguage(this.settings.uiLanguage);
       this.ui.folderInput.value = this.settings.downloadFolder;
@@ -1763,8 +1792,7 @@
         return;
       }
 
-      const isTikTok = videoInfo.platform === "tiktok";
-      const isModal = isTikTok ? isTikTokModalOpen() : isDouyinModalOpen();
+      const isModal = isDouyinModalOpen();
       const mode = isModal ? "modal" : "page";
 
       if (existing) {
