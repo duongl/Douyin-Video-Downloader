@@ -257,8 +257,16 @@
     try {
       const url = new URL(window.location.href);
       const isTikTok = window.location.hostname.includes("tiktok.com");
+      const profile = getProfileInfoFromUrl();
 
       if (isTikTok) {
+        // IMPORTANT: If user is on a profile page and no modal popup is currently open,
+        // do NOT show the single-video quick bar. The profile trigger button (#dyex-trigger)
+        // beside the channel's Video tab handles profile downloads.
+        if (profile && !isTikTokModalOpen()) {
+          return null;
+        }
+
         // 1. Dedicated TikTok video or photo page (/video/:id or /photo/:id)
         const ttMatch = window.location.pathname.match(/\/@([^/?#]+)\/(video|photo)\/(\d+)/);
         if (ttMatch) {
@@ -288,14 +296,13 @@
           }
         }
 
-        // 3. From Currently Playing / Focused Video on TikTok (Feed, Explore, or User page)
-        // User does NOT need to click comments - as soon as video plays, it is detected!
+        // 3. From Currently Playing Video on TikTok Feed (For You, Following, Explore)
+        // ONLY detect if actively playing with playback progress.
+        // NEVER detect paused videos or thumbnails by bounding box, and NEVER on profile pages.
         const videoElements = Array.from(document.querySelectorAll("video"));
-        const playingVideo = videoElements.find((v) => !v.paused && v.readyState >= 2) ||
-          videoElements.find((v) => {
-            const rect = v.getBoundingClientRect();
-            return rect.width > 120 && rect.height > 120 && rect.top < window.innerHeight * 0.75 && rect.bottom > window.innerHeight * 0.25;
-          });
+        const playingVideo = videoElements.find(
+          (v) => !v.paused && v.readyState >= 2 && !v.ended && v.currentTime > 0
+        );
 
         if (playingVideo) {
           let curr = playingVideo.parentElement;
@@ -315,6 +322,10 @@
       }
 
       // Douyin:
+      if (profile && !isDouyinModalOpen()) {
+        return null;
+      }
+
       // 1. Dedicated Douyin video or note page (/video/:id or /note/:id)
       const dyMatch = window.location.pathname.match(/\/(video|note)\/(\d+)/);
       if (dyMatch) {
@@ -350,6 +361,11 @@
         Object.assign(element.style, value);
       } else if (key === "hidden") {
         element.hidden = Boolean(value);
+        if (value) {
+          element.setAttribute("hidden", "");
+        } else {
+          element.removeAttribute("hidden");
+        }
       } else if (key === "disabled") {
         element.disabled = Boolean(value);
       } else {
@@ -362,22 +378,30 @@
   function findProfileTabAnchor() {
     const isTikTok = window.location.hostname.includes("tiktok.com");
     if (isTikTok) {
-      const ttTabSelectors = [
-        '[data-e2e="user-post-item-list"]',
-        'div[role="tablist"]',
-        'p[role="tab"]',
-        'div[role="tab"]',
-        '[data-e2e*="tab"]',
-        'div[class*="DivTabContainer"]'
-      ];
-      for (const sel of ttTabSelectors) {
-        const found = document.querySelector(sel);
-        if (found) return found;
+      // 1. Look for specific Video tab
+      const tabElements = Array.from(
+        document.querySelectorAll('[role="tab"], [data-e2e*="tab"], p[class*="Tab"], div[class*="Tab"]')
+      );
+      const videoTab = tabElements.find((el) => {
+        const text = (el.textContent || "").trim();
+        return /^(video|videos|video\s*\d+|bài đăng)$/i.test(text);
+      });
+      if (videoTab) return videoTab;
+
+      // 2. Look for tablist container or its first tab
+      const tablist = document.querySelector('div[role="tablist"], [role="tablist"]');
+      if (tablist) {
+        if (tablist.firstElementChild) return tablist.firstElementChild;
+        return tablist;
       }
+
+      // 3. Look for user header elements
       const headerFallback = document.querySelector(
-        '[data-e2e="user-subtitle"], [data-e2e="user-title"], h2[data-e2e="user-subtitle"], h1[data-e2e="user-title"]'
+        '[data-e2e="user-info-wrapper"], [data-e2e="user-stats"], [data-e2e="user-subtitle"], [data-e2e="user-title"], h2[data-e2e="user-subtitle"], h1[data-e2e="user-title"]'
       );
       if (headerFallback) return headerFallback;
+
+      return null;
     }
 
     for (const selector of CONFIG.ANCHOR_SELECTORS) {
@@ -1553,7 +1577,10 @@
       const quickBar = document.getElementById("dyex-quick-bar");
       if (quickBar && !quickBar.contains(event.target)) {
         const menu = quickBar.querySelector(".dyex-quick-menu");
-        if (menu) menu.hidden = true;
+        if (menu) {
+          menu.hidden = true;
+          menu.setAttribute("hidden", "");
+        }
       }
       this.ensureQuickBarDebounced();
       const trigger = document.getElementById(CONFIG.TRIGGER_ID);
@@ -1718,6 +1745,9 @@
         event.preventDefault();
         event.stopPropagation();
         this.openModal();
+        if (this.videos.length === 0 && !this.isFetching) {
+          this.handleFetchVideos({ resetFromStart: true });
+        }
       });
 
       return button;
@@ -1816,6 +1846,15 @@
         hidden: true
       });
 
+      const setMenuHidden = (hidden) => {
+        menu.hidden = Boolean(hidden);
+        if (hidden) {
+          menu.setAttribute("hidden", "");
+        } else {
+          menu.removeAttribute("hidden");
+        }
+      };
+
       const videoItem = createElement("button", {
         className: "dyex-quick-menu-item",
         type: "button",
@@ -1829,7 +1868,7 @@
       });
       videoItem.addEventListener("click", (e) => {
         e.stopPropagation();
-        menu.hidden = true;
+        setMenuHidden(true);
         this.handleQuickDownload(videoInfo, "video");
       });
       menu.appendChild(videoItem);
@@ -1848,7 +1887,7 @@
       });
       audioItem.addEventListener("click", (e) => {
         e.stopPropagation();
-        menu.hidden = true;
+        setMenuHidden(true);
         this.handleQuickDownload(videoInfo, "audio");
       });
       menu.appendChild(audioItem);
@@ -1868,7 +1907,7 @@
         });
         photoItem.addEventListener("click", (e) => {
           e.stopPropagation();
-          menu.hidden = true;
+          setMenuHidden(true);
           this.handleQuickDownload(videoInfo, "image");
         });
         menu.appendChild(photoItem);
@@ -1888,7 +1927,7 @@
       });
       openItem.addEventListener("click", async (e) => {
         e.stopPropagation();
-        menu.hidden = true;
+        setMenuHidden(true);
         this.openModal();
         await this.handleFetchSingleVideo(videoInfo);
       });
@@ -1896,7 +1935,8 @@
 
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        menu.hidden = !menu.hidden;
+        const isHidden = menu.hidden || menu.hasAttribute("hidden");
+        setMenuHidden(!isHidden);
       });
 
       container.appendChild(menu);

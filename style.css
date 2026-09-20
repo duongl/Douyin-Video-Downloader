@@ -2238,6 +2238,7 @@
   animation: dyex-fade-in 0.16s ease-out !important;
 }
 
+#dyex-quick-bar .dyex-quick-menu[hidden],
 .dyex-quick-menu[hidden] {
   display: none !important;
 }
