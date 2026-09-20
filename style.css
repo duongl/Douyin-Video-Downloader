@@ -2153,3 +2153,115 @@
     font-size: 12px;
   }
 }
+
+/* Quick Download Floating Widget for Single Videos */
+#dyex-quick-bar {
+  position: fixed;
+  right: 24px;
+  bottom: 84px;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  user-select: none;
+  animation: dyex-fade-in 0.2s ease-out;
+}
+
+.dyex-quick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: linear-gradient(135deg, #fe2c55 0%, #ff004f 100%);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: 9999px;
+  box-shadow: 0 4px 18px rgba(254, 44, 85, 0.45);
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.dyex-quick-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 22px rgba(254, 44, 85, 0.6);
+}
+
+.dyex-quick-btn:active {
+  transform: translateY(0);
+}
+
+.dyex-quick-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.dyex-quick-btn .dyex-spinner {
+  animation: dyex-spin 0.8s linear infinite;
+}
+
+.dyex-quick-menu {
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  min-width: 195px;
+  animation: dyex-fade-in 0.16s ease-out;
+}
+
+.dyex-quick-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  font-size: 13px;
+  color: #161823;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  width: 100%;
+}
+
+.dyex-quick-menu-item:hover {
+  background: #f1f2f5;
+}
+
+.dyex-quick-menu-item svg {
+  width: 16px;
+  height: 16px;
+  color: #fe2c55;
+  flex-shrink: 0;
+}
+
+.dyex-quick-toast {
+  background: rgba(22, 24, 35, 0.92);
+  color: #ffffff;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+  animation: dyex-fade-in 0.2s ease-out;
+}
+
+@media (prefers-color-scheme: dark) {
+  .dyex-quick-menu {
+    background: #252733;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  .dyex-quick-menu-item {
+    color: #e4e6eb;
+  }
+  .dyex-quick-menu-item:hover {
+    background: #323544;
+  }
+}
+

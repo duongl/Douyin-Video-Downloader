@@ -158,25 +158,41 @@
   }
 
   function extractVideoMetadata(item) {
-    if (!item || typeof item !== "object" || !item.aweme_id) return null;
+    if (!item || typeof item !== "object") return null;
+    const id = String(item.aweme_id || item.id || "");
+    if (!id) return null;
     const caption = String(item.desc || "");
     const title = String(item.title || caption || "Untitled");
+
     const videoUrl = toHttps(
-      item.video?.play_addr?.url_list?.[0] || item.video?.download_addr?.url_list?.[0] || ""
+      item.video?.play_addr?.url_list?.[0] ||
+      item.video?.playAddr ||
+      item.video?.download_addr?.url_list?.[0] ||
+      item.video?.downloadAddr ||
+      ""
     );
-    if (!videoUrl) return null;
-    const timestamp = Number(item.create_time);
+
+    const rawImages = item.images || item.imagePost?.images || [];
+    const images = rawImages
+      .map((img) => toHttps(img?.url_list?.[0] || img?.imageURL?.urlList?.[0] || img?.display_image?.url_list?.[0] || ""))
+      .filter(Boolean);
+
+    if (!videoUrl && !images.length) return null;
+
+    const timestamp = Number(item.create_time || item.createTime);
     return {
-      id: String(item.aweme_id),
+      id,
+      kind: images.length && !videoUrl ? "image" : "video",
       desc: caption,
       caption,
       title,
       createTime: Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp * 1000).toISOString() : "",
-      videoUrl,
-      audioUrl: toHttps(item.music?.play_url?.url_list?.[0] || ""),
-      coverUrl: toHttps(item.video?.cover?.url_list?.[0] || item.cover?.url_list?.[0] || ""),
+      videoUrl: videoUrl || images[0] || "",
+      images,
+      audioUrl: toHttps(item.music?.play_url?.url_list?.[0] || item.music?.playUrl || ""),
+      coverUrl: toHttps(item.video?.cover?.url_list?.[0] || item.cover?.url_list?.[0] || item.video?.cover || images[0] || ""),
       dynamicCoverUrl: toHttps(
-        item.video?.dynamic_cover?.url_list?.[0] || item.dynamic_cover?.url_list?.[0] || ""
+        item.video?.dynamic_cover?.url_list?.[0] || item.dynamic_cover?.url_list?.[0] || item.video?.dynamicCover || ""
       )
     };
   }
@@ -220,11 +236,26 @@
       this.referrer = options.referrer || "https://www.douyin.com/";
     }
 
+    _signUrl(url) {
+      const signer = globalScope.DYEXABogus;
+      if (signer && typeof signer.signUrl === "function") {
+        try {
+          return signer.signUrl(url.toString(), navigator.userAgent);
+        } catch (error) {
+          console.warn("Failed to generate a_bogus signature:", error);
+        }
+      }
+      return url.toString();
+    }
+
     async fetchVideos(maxCursor = 0) {
       const url = new URL(this.apiBaseUrl);
       const query = { ...this.requestQuery, sec_user_id: this.secUserId, max_cursor: String(maxCursor) };
       Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, value));
-      const response = await fetch(url.toString(), {
+
+      const signedUrl = this._signUrl(url);
+
+      const response = await fetch(signedUrl, {
         method: "GET",
         credentials: "include",
         referrer: this.referrer,
@@ -258,6 +289,103 @@
       }
       return payload;
     }
+
+    async fetchDetail(awemeId) {
+      const url = new URL("https://www.douyin.com/aweme/v1/web/aweme/detail/");
+      const query = { ...this.requestQuery, aweme_id: String(awemeId) };
+      delete query.sec_user_id;
+      delete query.max_cursor;
+      delete query.count;
+      Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, value));
+
+      const signedUrl = this._signUrl(url);
+
+      const response = await fetch(signedUrl, {
+        method: "GET",
+        credentials: "include",
+        referrer: this.referrer,
+        signal: this.signal,
+        headers: { Accept: "application/json, text/plain, */*" }
+      });
+      if (!response.ok) {
+        const status = Number(response.status);
+        const code = [401, 403].includes(status)
+          ? ERROR_CODES.DOUYIN_SESSION_EXPIRED
+          : status === 429
+            ? ERROR_CODES.DOUYIN_RATE_LIMITED
+            : ERROR_CODES.DOUYIN_REQUEST_FAILED;
+        throw new CoreError(code, `HTTP ${status} while fetching video detail.`, {
+          status,
+          retryable: status === 429 || status >= 500
+        });
+      }
+      let payload;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        throw new CoreError(ERROR_CODES.DOUYIN_SCHEMA_INVALID, "Douyin returned malformed JSON.", { cause: error });
+      }
+      if (Number(payload?.status_code || 0) !== 0) {
+        throw new CoreError(
+          ERROR_CODES.DOUYIN_REQUEST_FAILED,
+          `Douyin API returned status_code ${payload.status_code}.`,
+          { details: { statusCode: payload.status_code } }
+        );
+      }
+      if (!payload.aweme_detail) {
+        throw new CoreError(ERROR_CODES.DOUYIN_SCHEMA_INVALID, "Douyin returned empty video detail.");
+      }
+      return payload.aweme_detail;
+    }
+  }
+
+  class TikTokApiClient {
+    constructor(options = {}) {
+      this.signal = options.signal || null;
+      this.referrer = options.referrer || "https://www.tiktok.com/";
+    }
+
+    async fetchDetail(itemId) {
+      const url = new URL("https://www.tiktok.com/api/item/detail/");
+      const randomDigits = Array.from({ length: 19 }, () => Math.floor(Math.random() * 10)).join("");
+      const params = {
+        itemId: String(itemId),
+        device_platform: "web_pc",
+        aid: "1988",
+        app_name: "tiktok_web",
+        channel: "tiktok_web",
+        device_id: randomDigits,
+        os: "windows",
+        priority_region: "US",
+        region: "US",
+        language: "en",
+        browser_language: "en-US",
+        browser_platform: "Win32",
+        browser_name: "Mozilla",
+        browser_version: "5.0 (Windows)",
+        cookie_enabled: "true",
+        screen_width: "1920",
+        screen_height: "1080"
+      };
+      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        credentials: "include",
+        referrer: this.referrer,
+        signal: this.signal,
+        headers: { Accept: "application/json, text/plain, */*" }
+      });
+      if (!response.ok) {
+        throw new CoreError(ERROR_CODES.DOUYIN_REQUEST_FAILED, `HTTP ${response.status} while fetching TikTok video detail.`);
+      }
+      const payload = await response.json();
+      const item = payload?.itemInfo?.itemStruct;
+      if (!item) {
+        throw new CoreError(ERROR_CODES.DOUYIN_SCHEMA_INVALID, "TikTok returned empty video detail.");
+      }
+      return item;
+    }
   }
 
   globalScope.DYEXCore = Object.freeze({
@@ -272,6 +400,7 @@
     migrateSettings,
     extractVideoMetadata,
     normalizeDouyinPayload,
-    DouyinApiClient
+    DouyinApiClient,
+    TikTokApiClient
   });
 })(globalThis);

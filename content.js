@@ -79,9 +79,30 @@
       device_platform: "webapp",
       aid: "6383",
       channel: "channel_pc_web",
+      pc_client_type: "1",
+      version_code: "290100",
+      version_name: "29.1.0",
+      update_version_code: "170400",
+      cookie_enabled: "true",
+      screen_width: "1920",
+      screen_height: "1080",
+      browser_language: "zh-CN",
+      browser_platform: "Win32",
+      browser_name: "Chrome",
+      browser_version: "130.0.0.0",
+      browser_online: "true",
+      engine_name: "Blink",
+      engine_version: "130.0.0.0",
+      os_name: "Windows",
+      os_version: "10",
+      cpu_core_num: "12",
+      device_memory: "8",
+      platform: "PC",
+      downlink: "10",
+      effective_type: "4g",
+      round_trip_time: "0",
       count: "20",
-      version_code: "170400",
-      version_name: "17.4.0"
+      publish_video_strategy_type: "2"
     }
   };
 
@@ -195,6 +216,35 @@
     return match ? match[1] : "";
   }
 
+  function getActiveVideoInfo() {
+    try {
+      const url = new URL(window.location.href);
+      const isTikTok = window.location.hostname.includes("tiktok.com");
+
+      // 1. Douyin query modal_id or vid (?modal_id=... or ?vid=...)
+      const modalId = url.searchParams.get("modal_id") || url.searchParams.get("vid");
+      if (modalId && /^\d+$/.test(modalId)) {
+        return { platform: "douyin", id: modalId, kind: "video" };
+      }
+
+      // 2. Douyin path /video/:id or /note/:id
+      const dyMatch = window.location.pathname.match(/\/(video|note)\/(\d+)/);
+      if (dyMatch) {
+        return { platform: "douyin", id: dyMatch[2], kind: dyMatch[1] === "note" ? "image" : "video" };
+      }
+
+      // 3. TikTok /@:user/video/:id or /photo/:id
+      if (isTikTok) {
+        const ttMatch = window.location.pathname.match(/\/@([^/?#]+)\/(video|photo)\/(\d+)/);
+        if (ttMatch) {
+          return { platform: "tiktok", id: ttMatch[3], kind: ttMatch[2] === "photo" ? "image" : "video", author: ttMatch[1] };
+        }
+      }
+    } catch (_e) {}
+
+    return null;
+  }
+
   function createElement(tagName, options = {}) {
     const element = document.createElement(tagName);
     Object.entries(options).forEach(([key, value]) => {
@@ -293,6 +343,8 @@
   }
 
   const DouyinApiClient = Core.DouyinApiClient;
+  const TikTokApiClient = Core.TikTokApiClient;
+  const extractVideoMetadata = Core.extractVideoMetadata;
   const VideoDataProcessor = Object.freeze({ processPayload: Core.normalizeDouyinPayload });
 
   class DouyinDownloaderExtension {
@@ -373,6 +425,7 @@
       this.fetchAbortController = null;
       this.ui = {};
       this.ensureTriggerButtonDebounced = debounce(() => this.ensureTriggerButton(), 180);
+      this.ensureQuickBarDebounced = debounce(() => this.ensureQuickBar(), 180);
       this.persistUiPreferencesDebounced = debounce(() => {
         this.persistSettings().catch((error) => console.error("Failed to save UI preferences:", error));
       }, 250);
@@ -406,6 +459,7 @@
       await this.loadSettings();
       this.bindEvents();
       this.ensureTriggerButton();
+      this.ensureQuickBar();
       this.startObservers();
       await this.syncQueueStatus();
       this.autoFetchCurrentProfile();
@@ -1339,6 +1393,7 @@
 
     startObservers() {
       this.routeTimer = window.setInterval(() => {
+        this.ensureQuickBar();
         const nextSecUserId = getSecUserIdFromUrl();
         if (nextSecUserId === this.currentSecUserId) return;
         this.currentSecUserId = nextSecUserId;
@@ -1353,6 +1408,7 @@
 
       this.domObserver = new MutationObserver(() => {
         this.ensureTriggerButtonDebounced();
+        this.ensureQuickBarDebounced();
       });
 
       if (document.body) {
@@ -1364,10 +1420,16 @@
 
       this.repairTimer = window.setInterval(() => {
         this.ensureTriggerButton();
+        this.ensureQuickBar();
       }, CONFIG.BUTTON_RETRY_MS);
     }
 
     onDocumentClick(event) {
+      const quickBar = document.getElementById("dyex-quick-bar");
+      if (quickBar && !quickBar.contains(event.target)) {
+        const menu = quickBar.querySelector(".dyex-quick-menu");
+        if (menu) menu.hidden = true;
+      }
       const trigger = document.getElementById(CONFIG.TRIGGER_ID);
       if (trigger && trigger.contains(event.target)) return;
       if (this.ui.modal.contains(event.target)) return;
@@ -1556,6 +1618,324 @@
       trigger.setAttribute("aria-busy", String(isBusy));
       trigger.title = this.t(isBusy ? "Loading Douyin videos..." : "Open Douyin Downloader");
       trigger.setAttribute("aria-label", trigger.title);
+    }
+
+    ensureQuickBar() {
+      const videoInfo = getActiveVideoInfo();
+      const existing = document.getElementById("dyex-quick-bar");
+      if (!videoInfo) {
+        if (existing) existing.remove();
+        return;
+      }
+
+      if (existing) {
+        if (existing.dataset.videoId === videoInfo.id && existing.dataset.platform === videoInfo.platform) {
+          if (!existing.isConnected && document.body) {
+            document.body.appendChild(existing);
+          }
+          return;
+        }
+        existing.remove();
+      }
+
+      const bar = this.createQuickBar(videoInfo);
+      if (document.body) {
+        document.body.appendChild(bar);
+      }
+    }
+
+    createQuickBar(videoInfo) {
+      const container = createElement("div", {
+        id: "dyex-quick-bar",
+        dataset: {
+          videoId: videoInfo.id,
+          platform: videoInfo.platform,
+          kind: videoInfo.kind || "video"
+        }
+      });
+
+      const isImage = videoInfo.kind === "image";
+      const btn = createElement("button", {
+        className: "dyex-quick-btn",
+        type: "button",
+        title: this.t("Download options for this video"),
+        innerHTML: `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span class="dyex-quick-btn-label">${escapeHtml(isImage ? this.t("Download Photos") : this.t("Download Video"))}</span>
+        `
+      });
+
+      const menu = createElement("div", {
+        className: "dyex-quick-menu",
+        hidden: true
+      });
+
+      const videoItem = createElement("button", {
+        className: "dyex-quick-menu-item",
+        type: "button",
+        innerHTML: `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+          </svg>
+          <span>${escapeHtml(this.t("Download Video (No Watermark)"))}</span>
+        `
+      });
+      videoItem.addEventListener("click", (e) => {
+        e.stopPropagation();
+        menu.hidden = true;
+        this.handleQuickDownload(videoInfo, "video");
+      });
+      menu.appendChild(videoItem);
+
+      const audioItem = createElement("button", {
+        className: "dyex-quick-menu-item",
+        type: "button",
+        innerHTML: `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18V5l12-2v13"></path>
+            <circle cx="6" cy="18" r="3"></circle>
+            <circle cx="18" cy="16" r="3"></circle>
+          </svg>
+          <span>${escapeHtml(this.t("Download Audio (MP3)"))}</span>
+        `
+      });
+      audioItem.addEventListener("click", (e) => {
+        e.stopPropagation();
+        menu.hidden = true;
+        this.handleQuickDownload(videoInfo, "audio");
+      });
+      menu.appendChild(audioItem);
+
+      if (isImage) {
+        const photoItem = createElement("button", {
+          className: "dyex-quick-menu-item",
+          type: "button",
+          innerHTML: `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+            <span>${escapeHtml(this.t("Download All Photos (HD)"))}</span>
+          `
+        });
+        photoItem.addEventListener("click", (e) => {
+          e.stopPropagation();
+          menu.hidden = true;
+          this.handleQuickDownload(videoInfo, "image");
+        });
+        menu.appendChild(photoItem);
+      }
+
+      const openItem = createElement("button", {
+        className: "dyex-quick-menu-item",
+        type: "button",
+        innerHTML: `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+          <span>${escapeHtml(this.t("Open in Downloader"))}</span>
+        `
+      });
+      openItem.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        menu.hidden = true;
+        this.openModal();
+        await this.handleFetchSingleVideo(videoInfo);
+      });
+      menu.appendChild(openItem);
+
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        menu.hidden = !menu.hidden;
+      });
+
+      container.appendChild(menu);
+      container.appendChild(btn);
+      return container;
+    }
+
+    showQuickToast(message, duration = 3000) {
+      const quickBar = document.getElementById("dyex-quick-bar");
+      const toast = createElement("div", {
+        className: "dyex-quick-toast",
+        textContent: message
+      });
+      if (quickBar) {
+        quickBar.insertBefore(toast, quickBar.firstChild);
+      } else if (document.body) {
+        document.body.appendChild(toast);
+      }
+      setTimeout(() => toast.remove(), duration);
+    }
+
+    async handleQuickDownload(videoInfo, action = "video") {
+      const quickBar = document.getElementById("dyex-quick-bar");
+      const btn = quickBar?.querySelector(".dyex-quick-btn");
+      const originalHtml = btn ? btn.innerHTML : "";
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `
+          <svg class="dyex-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+            <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+          </svg>
+          <span>${escapeHtml(this.t("Fetching..."))}</span>
+        `;
+      }
+      this.showQuickToast(this.t("Fetching..."));
+
+      try {
+        let rawItem;
+        if (videoInfo.platform === "tiktok") {
+          const client = new TikTokApiClient({ referrer: window.location.href });
+          rawItem = await client.fetchDetail(videoInfo.id);
+        } else {
+          const client = new DouyinApiClient("", { referrer: window.location.href });
+          rawItem = await client.fetchDetail(videoInfo.id);
+        }
+
+        const normalized = extractVideoMetadata(rawItem);
+        if (!normalized || (!normalized.videoUrl && (!normalized.images || !normalized.images.length))) {
+          throw new Error(this.t("Could not find downloadable media for this post."));
+        }
+
+        let items = [];
+        let kind = action;
+
+        if (action === "video") {
+          if (normalized.videoUrl) {
+            items = [{
+              id: normalized.id,
+              url: normalized.videoUrl,
+              filename: this.getDownloadFilename(normalized, "video")
+            }];
+          } else if (normalized.images && normalized.images.length) {
+            kind = "image";
+            items = normalized.images.map((imgUrl, idx) => ({
+              id: `${normalized.id}_${idx + 1}`,
+              url: imgUrl,
+              filename: this.getDownloadFilename(normalized, "image", "", idx + 1)
+            }));
+          }
+        } else if (action === "image") {
+          if (normalized.images && normalized.images.length) {
+            items = normalized.images.map((imgUrl, idx) => ({
+              id: `${normalized.id}_${idx + 1}`,
+              url: imgUrl,
+              filename: this.getDownloadFilename(normalized, "image", "", idx + 1)
+            }));
+          } else {
+            throw new Error(this.t("No images found in this post."));
+          }
+        } else if (action === "audio") {
+          if (normalized.audioUrl) {
+            items = [{
+              id: normalized.id,
+              url: normalized.audioUrl,
+              filename: this.getDownloadFilename(normalized, "audio")
+            }];
+          } else {
+            throw new Error(this.t("No audio found in this post."));
+          }
+        }
+
+        if (!items.length) {
+          throw new Error(this.t("No download URLs available."));
+        }
+
+        if (btn) {
+          btn.innerHTML = `
+            <svg class="dyex-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+              <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+            </svg>
+            <span>${escapeHtml(this.t("Downloading..."))}</span>
+          `;
+        }
+
+        const response = await sendRuntimeMessage({
+          type: "START_DOWNLOAD_QUEUE",
+          payload: {
+            kind,
+            delayMs: 0,
+            items
+          }
+        });
+
+        if (!response?.ok) {
+          throw new Core.CoreError(
+            response?.errorCode || Core.ERROR_CODES.DOWNLOAD_API_FAILED,
+            response?.error || "Failed to start download queue."
+          );
+        }
+
+        this.showQuickToast(this.t("Started!"));
+      } catch (error) {
+        console.error("Quick download error:", error);
+        this.showQuickToast(error?.message || this.t("Failed to load video."));
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalHtml;
+        }
+      }
+    }
+
+    async handleFetchSingleVideo(videoInfo) {
+      if (this.isFetching || this.isDownloading) return;
+
+      this.setFetchState("fetching");
+      this.fetchError = "";
+      this.videos = [];
+      this.videoMap = new Map();
+      this.selectedIds.clear();
+      this.renderVideos();
+      this.updateSelectionUi();
+      this.updateControlState();
+      this.setStatusKey("Loading video...", {}, "info", true);
+
+      try {
+        let rawItem;
+        if (videoInfo.platform === "tiktok") {
+          const client = new TikTokApiClient({ referrer: window.location.href });
+          rawItem = await client.fetchDetail(videoInfo.id);
+        } else {
+          const client = new DouyinApiClient("", { referrer: window.location.href });
+          rawItem = await client.fetchDetail(videoInfo.id);
+        }
+
+        const video = extractVideoMetadata(rawItem);
+        if (!video || !video.id) {
+          throw new Error("Could not extract video metadata.");
+        }
+
+        this.videos = [video];
+        this.videoMap = new Map([[video.id, video]]);
+        this.selectedIds = new Set([video.id]);
+        this.hasFetched = true;
+        this.lastUpdatedAt = Date.now();
+        this.setFetchState("ready");
+        this.renderVideos();
+        this.updateSelectionUi();
+        this.updateControlState();
+        this.setStatusKey("Video loaded successfully.", {}, "success");
+      } catch (error) {
+        this.setFetchState("error");
+        this.fetchError = error?.message || "Failed to load video.";
+        this.renderVideos();
+        this.updateSelectionUi();
+        this.updateControlState();
+        this.setErrorStatus(error, "Failed to load video.");
+      }
     }
 
     autoFetchCurrentProfile() {
@@ -1931,7 +2311,7 @@
               <td class="dyex-date dyex-row-date">${escapeHtml(formatDisplayDate(video.createTime, UI_LOCALES[this.activeUiLanguage]))}</td>
               <td class="dyex-row-actions">
                 <div class="dyex-actions">
-                  <a href="${escapeHtml(video.videoUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(this.t("Video"))}</a>
+                  <a href="${escapeHtml(video.videoUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(video.kind === "image" ? (this.t("Image") || "Image") : this.t("Video"))}</a>
                   ${audioLink}
                 </div>
               </td>
@@ -2058,6 +2438,11 @@
 
       const secUserId = options.secUserId || getSecUserIdFromUrl();
       if (!secUserId) {
+        const activeVideo = getActiveVideoInfo();
+        if (activeVideo) {
+          await this.handleFetchSingleVideo(activeVideo);
+          return;
+        }
         this.setStatusKey("Could not find sec_user_id in the current URL.", {}, "error");
         return;
       }
@@ -2209,16 +2594,20 @@
       return this.videos.filter((video) => this.selectedIds.has(video.id));
     }
 
-    getDownloadFilename(video, kind, translatedTitle = "") {
+    getDownloadFilename(video, kind, translatedTitle = "", index = 0) {
       const date = formatFileDate(video.createTime);
       const baseFolder = sanitizeFolderPath(this.settings.downloadFolder);
-      const typeFolder = kind === "video" ? "videos" : "audios";
+      const typeFolder = kind === "video" ? "videos" : kind === "image" ? "images" : "audios";
       const prefix = baseFolder ? `${baseFolder}/${typeFolder}` : typeFolder;
       const filePrefix = sanitizeFileComponent((baseFolder || "douyin_downloads").replace(/\//g, "_"), "douyin_downloads");
       const titleSource = translatedTitle || video.caption || video.title || video.desc || video.id;
       const titlePart = sanitizeFileComponent(titleSource, `video_${video.id}`);
       if (kind === "video") {
         return `${prefix}/${filePrefix}_${titlePart}_${date}_${video.id}.mp4`;
+      }
+      if (kind === "image") {
+        const idxSuffix = index > 0 ? `_${index}` : "";
+        return `${prefix}/${filePrefix}_${titlePart}_${date}_${video.id}${idxSuffix}.jpg`;
       }
       return `${prefix}/${filePrefix}_${titlePart}_${date}_${video.id}.mp3`;
     }

@@ -185,7 +185,20 @@
       "Failed to save settings.": "Không thể lưu cài đặt.",
       "{count} saved key(s) — leave blank to keep": "Đã lưu {count} khóa — để trống để giữ nguyên",
       "{provider} keys will be removed when you save": "Khóa {provider} sẽ bị xóa khi lưu",
-      "{provider} keys marked for removal. Click Save settings to confirm.": "Đã đánh dấu xóa khóa {provider}. Bấm Lưu cài đặt để xác nhận."
+      "{provider} keys marked for removal. Click Save settings to confirm.": "Đã đánh dấu xóa khóa {provider}. Bấm Lưu cài đặt để xác nhận.",
+      "Download This Video (No Watermark)": "Tải video này (Không logo)",
+      "Download Video": "Tải Video",
+      "Download Photos": "Tải ảnh",
+      "Download Video (No Watermark)": "Tải Video (Không logo)",
+      "Download Audio (MP3)": "Tải Audio (MP3)",
+      "Download All Photos (HD)": "Tải toàn bộ ảnh (HD)",
+      "Open in Downloader": "Mở trong Downloader",
+      "Fetching...": "Đang lấy link...",
+      "Downloading...": "Đang tải...",
+      "Started!": "Đã bắt đầu!",
+      "Loading video...": "Đang tải video...",
+      "Video loaded successfully.": "Đã tải video thành công.",
+      "Failed to load video.": "Không thể tải video."
     },
     JP: {
       "Ready.": "準備完了。",

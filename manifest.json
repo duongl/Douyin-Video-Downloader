@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Douyin User Video Downloader",
-  "version": "1.5.2",
-  "description": "Batch download Douyin media with optional AI-translated filenames.",
+  "version": "1.6.0",
+  "description": "Batch download Douyin and TikTok media with optional AI-translated filenames.",
   "permissions": [
     "downloads",
     "storage",
@@ -13,6 +13,8 @@
   "host_permissions": [
     "https://www.douyin.com/*",
     "https://*.douyin.com/*",
+    "https://www.tiktok.com/*",
+    "https://*.tiktok.com/*",
     "https://generativelanguage.googleapis.com/*",
     "https://api.groq.com/*"
   ],
@@ -28,9 +30,13 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.douyin.com/*"
+        "https://www.douyin.com/*",
+        "https://*.douyin.com/*",
+        "https://www.tiktok.com/*",
+        "https://*.tiktok.com/*"
       ],
       "js": [
+        "abogus.js",
         "core.js",
         "locales.js",
         "content.js"
@@ -47,7 +53,10 @@
         "QR.png"
       ],
       "matches": [
-        "https://www.douyin.com/*"
+        "https://www.douyin.com/*",
+        "https://*.douyin.com/*",
+        "https://www.tiktok.com/*",
+        "https://*.tiktok.com/*"
       ]
     }
   ],
